@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "Blog.ManagedIdentities.Function": {
+      "commandName": "Project",
+      "commandLineArgs": "--port 7198",
+      "launchBrowser": false
+    }
+  }
+}

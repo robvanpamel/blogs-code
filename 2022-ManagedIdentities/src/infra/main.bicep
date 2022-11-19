@@ -1,3 +1,6 @@
+//  RUN WITH 
+// az deployment group create --resource-group rg-blog-managed-identities-storage --template-file main.bicep
+
 @description('Managed Identies with Storage accounts')
 
 param storageAccountType string = 'Standard_LRS'
@@ -6,9 +9,9 @@ param storageAccountType string = 'Standard_LRS'
 param location string = resourceGroup().location
 
 @description('The name of the Storage Account')
-param storageAccountName string = 'store${uniqueString(resourceGroup().id)}'
+param storageAccountName string = 'safct${uniqueString(resourceGroup().id)}'
 
-resource sa 'Microsoft.Storage/storageAccounts@2021-06-01' = {
+resource storageAccount 'Microsoft.Storage/storageAccounts@2021-06-01' = {
   name: storageAccountName
   location: location
   sku: {
@@ -17,11 +20,14 @@ resource sa 'Microsoft.Storage/storageAccounts@2021-06-01' = {
   kind: 'StorageV2'
   properties: {
   }
+  tags:{
+    blog: 'blog-managed-identities-storage'
+  }
 }
 
 resource usermanagedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2022-01-31-preview' = {
   location: location
-  name: 'myUserAssigndIdentity'
+  name: 'uai-blobcontributer'
   tags: {
     blog: 'blog-managed-identities-storage'
   }
@@ -41,6 +47,73 @@ resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
+resource appServicePlan 'Microsoft.Web/serverfarms@2022-03-01' = {
+  location: location
+  name: 'asp-blog-managed-identities'
+  kind: 'linux'
+  sku:{
+    name: 'Y1'
+    tier: 'Dynamic'
+  }
+  properties:{
+    reserved: true
+  }
+  tags:{
+    blog: 'blog-managed-identities-storage'
+  }
+}
+
+resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: 'ai-fct-blobwriter'
+  location: location
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    Request_Source: 'rest'
+  }
+}
+
+resource functionApp 'Microsoft.Web/sites@2022-03-01'={
+  name: 'fct-blobwriter'
+  location: location
+  kind: 'functionapp'
+  identity: {
+     type: 'UserAssigned'
+     userAssignedIdentities: {
+      '${usermanagedIdentity.id}': {}
+     }
+  }
+  properties:{
+    serverFarmId: appServicePlan.id
+    siteConfig: {
+      appSettings: [
+        {
+          name: 'AzureWebJobsStorage'
+          value: 'DefaultEndpointsProtocol=https;AccountName=${storageAccountName};EndpointSuffix=${environment().suffixes.storage};AccountKey=${storageAccount.listKeys().keys[0].value}'
+        }
+        {
+          name: 'FUNCTIONS_EXTENSION_VERSION'
+          value: '~4'
+        }
+        {
+          name: 'APPINSIGHTS_INSTRUMENTATIONKEY'
+          value: applicationInsights.properties.InstrumentationKey
+        }
+        {
+          name: 'FUNCTIONS_WORKER_RUNTIME'
+          value: 'dotnet-isolated'
+        }
+        {
+          name: 'AZURE_CLIENT_ID'
+          value: usermanagedIdentity.properties.clientId 
+        }
+      ]
+      minTlsVersion: '1.2'
+    }
+    httpsOnly: true
+  }
+}
+
 output storageAccountName string = storageAccountName
-output storageAccountId string = sa.id
+output storageAccountId string = storageAccount.id
 output usermangedIdentityId string = usermanagedIdentity.id
